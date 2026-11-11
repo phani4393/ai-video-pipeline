@@ -1,0 +1,46 @@
+# AI Video Pipeline Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+loguru>=0.7.0
+
+# Async & HTTP
+aiohttp>=3.9.0
+httpx>=0.25.0
+requests>=2.31.0
+
+# AI/ML APIs
+openai>=1.0.0
+anthropic>=0.7.0
+
+# Local Speech Processing
+openai-whisper>=20231117
+# For Kokoro TTS (optional, local voice):
+# kokoro-tts>=0.1.0
+
+# Video Processing
+ffmpeg-python>=0.2.0
+# Note: FFmpeg binary must be installed separately
+
+# Data Storage
+pyairtable>=2.0.0
+
+# YouTube Publishing
+google-api-python-client>=2.0.0
+google-auth-oauthlib>=1.0.0
+google-auth-httplib2>=0.2.0
+
+# Image Processing (for thumbnails)
+Pillow>=10.0.0
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+
+# Development
+black>=23.0.0
+ruff>=0.1.0
+mypy>=1.0.0

@@ -1,0 +1,300 @@
+{
+  "name": "AI-Video-Topic-Scanner",
+  "description": "Monitors RSS feeds for trending AI/tech topics, scores them for viral potential, and alerts team for high-scoring topics",
+  "version": "1.0.0",
+  "modules": [
+    {
+      "id": 1,
+      "name": "feedly",
+      "module": "feedly:WatchArticles",
+      "description": "Watch for new articles from AI & Tech feed collection",
+      "parameters": {
+        "feed": "{{FEEDLY_COLLECTION_ID}}",
+        "limit": 10,
+        "sortBy": "newest"
+      },
+      "trigger": true,
+      "schedule": {
+        "type": "interval",
+        "interval": 15,
+        "unit": "minutes"
+      }
+    },
+    {
+      "id": 2,
+      "name": "text-parser",
+      "module": "builtin:TextParser",
+      "description": "Extract and clean article content",
+      "parameters": {
+        "input": "{{1.content}}",
+        "operations": [
+          { "type": "stripHtml" },
+          { "type": "trim" },
+          { "type": "truncate", "length": 2000 }
+        ]
+      },
+      "mappable": true
+    },
+    {
+      "id": 3,
+      "name": "keyword-filter",
+      "module": "builtin:BasicFilter",
+      "description": "Filter for relevant keywords",
+      "parameters": {
+        "condition": {
+          "type": "or",
+          "conditions": [
+            { "field": "{{1.title}}", "operator": "contains", "value": "AI" },
+            { "field": "{{1.title}}", "operator": "contains", "value": "GPT" },
+            { "field": "{{1.title}}", "operator": "contains", "value": "Claude" },
+            { "field": "{{1.title}}", "operator": "contains", "value": "startup" },
+            { "field": "{{1.title}}", "operator": "contains", "value": "funding" },
+            { "field": "{{1.title}}", "operator": "contains", "value": "launch" },
+            { "field": "{{1.title}}", "operator": "contains", "value": "automation" },
+            { "field": "{{2.output}}", "operator": "contains", "value": "artificial intelligence" },
+            { "field": "{{2.output}}", "operator": "contains", "value": "machine learning" }
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "airtable-duplicate-check",
+      "module": "airtable:SearchRecords",
+      "description": "Check if topic already processed",
+      "parameters": {
+        "baseId": "{{AIRTABLE_BASE_ID}}",
+        "tableId": "Topic Queue",
+        "filterByFormula": "OR({URL} = '{{1.url}}', {Title} = '{{1.title}}')",
+        "maxRecords": 1
+      }
+    },
+    {
+      "id": 5,
+      "name": "duplicate-filter",
+      "module": "builtin:BasicFilter",
+      "description": "Stop if duplicate found",
+      "parameters": {
+        "condition": {
+          "type": "equals",
+          "field": "{{length(4.records)}}",
+          "value": 0
+        }
+      }
+    },
+    {
+      "id": 6,
+      "name": "openai-scoring",
+      "module": "http:ActionSendData",
+      "description": "Score topic for viral potential using GPT-4",
+      "parameters": {
+        "url": "https://api.openai.com/v1/chat/completions",
+        "method": "POST",
+        "headers": [
+          { "name": "Authorization", "value": "Bearer {{OPENAI_API_KEY}}" },
+          { "name": "Content-Type", "value": "application/json" }
+        ],
+        "body": {
+          "model": "gpt-4-turbo-preview",
+          "messages": [
+            {
+              "role": "system",
+              "content": "You are a content strategist for a tech YouTube channel with 500K subscribers. Your audience loves: practical AI tutorials, startup stories, tool reviews, and automation workflows.\n\nAnalyze topics for viral potential based on:\n1. RELEVANCE (0-10): How well does this match audience interests?\n2. TIMELINESS (0-10): Is this breaking news or evergreen?\n3. UNIQUENESS (0-10): Are competitors already covering this?\n4. HOOK POTENTIAL (0-10): Can this generate curiosity/emotion?\n\nReturn JSON only with keys: topic, overall_score, dimensions, reasoning, suggested_angles, risk_factors"
+            },
+            {
+              "role": "user", 
+              "content": "TOPIC: {{1.title}}\n\nSUMMARY: {{2.output}}\n\nSOURCE: {{1.origin.title}}\n\nPUBLISHED: {{1.published}}"
+            }
+          ],
+          "response_format": { "type": "json_object" },
+          "temperature": 0.3
+        },
+        "timeout": 30
+      }
+    },
+    {
+      "id": 7,
+      "name": "parse-score",
+      "module": "json:ParseJSON",
+      "description": "Extract score from OpenAI response",
+      "parameters": {
+        "input": "{{6.body.choices[0].message.content}}"
+      }
+    },
+    {
+      "id": 8,
+      "name": "score-router",
+      "module": "builtin:Router",
+      "description": "Route based on score threshold",
+      "parameters": {
+        "routes": [
+          {
+            "name": "high_score",
+            "condition": {
+              "type": "gte",
+              "field": "{{7.overall_score}}",
+              "value": 7
+            },
+            "modules": [9, 10, 11]
+          },
+          {
+            "name": "low_score",
+            "condition": {
+              "type": "lt",
+              "field": "{{7.overall_score}}",
+              "value": 7
+            },
+            "modules": [12]
+          }
+        ]
+      }
+    },
+    {
+      "id": 9,
+      "name": "slack-alert",
+      "module": "slack:CreateMessage",
+      "description": "Send high-scoring topic alert to Slack",
+      "parameters": {
+        "channel": "{{SLACK_CHANNEL_ID}}",
+        "text": "",
+        "blocks": [
+          {
+            "type": "header",
+            "text": {
+              "type": "plain_text",
+              "text": "🔥 NEW HIGH-POTENTIAL TOPIC DETECTED"
+            }
+          },
+          {
+            "type": "section",
+            "fields": [
+              { "type": "mrkdwn", "text": "*Topic:*\n{{1.title}}" },
+              { "type": "mrkdwn", "text": "*Score:*\n{{7.overall_score}}/10" }
+            ]
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "*Reasoning:* {{7.reasoning}}"
+            }
+          },
+          {
+            "type": "section",
+            "text": {
+              "type": "mrkdwn",
+              "text": "*Suggested Angles:*\n• {{7.suggested_angles[0]}}\n• {{7.suggested_angles[1]}}\n• {{7.suggested_angles[2]}}"
+            }
+          },
+          {
+            "type": "context",
+            "elements": [
+              { "type": "mrkdwn", "text": "⏰ Detected: {{now}}" },
+              { "type": "mrkdwn", "text": "🔗 <{{1.url}}|Original Article>" }
+            ]
+          },
+          {
+            "type": "actions",
+            "elements": [
+              {
+                "type": "button",
+                "text": { "type": "plain_text", "text": "✅ Approve" },
+                "style": "primary",
+                "value": "{{1.id}}"
+              },
+              {
+                "type": "button",
+                "text": { "type": "plain_text", "text": "❌ Reject" },
+                "style": "danger",
+                "value": "{{1.id}}"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": 10,
+      "name": "airtable-add-approved",
+      "module": "airtable:CreateRecord",
+      "description": "Add approved topic to queue",
+      "parameters": {
+        "baseId": "{{AIRTABLE_BASE_ID}}",
+        "tableId": "Topic Queue",
+        "fields": {
+          "Title": "{{1.title}}",
+          "URL": "{{1.url}}",
+          "Source": "{{1.origin.title}}",
+          "Score": "{{7.overall_score}}",
+          "Reasoning": "{{7.reasoning}}",
+          "Angles": "{{toJSON(7.suggested_angles)}}",
+          "Risk Factors": "{{toJSON(7.risk_factors)}}",
+          "Status": "pending",
+          "Published Date": "{{1.published}}"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "name": "trigger-research",
+      "module": "http:ActionSendData",
+      "description": "Optional: Trigger research pipeline via webhook",
+      "parameters": {
+        "url": "{{RESEARCH_WEBHOOK_URL}}",
+        "method": "POST",
+        "body": {
+          "topic_id": "{{10.id}}",
+          "title": "{{1.title}}",
+          "angle": "{{7.suggested_angles[0]}}"
+        }
+      },
+      "optional": true
+    },
+    {
+      "id": 12,
+      "name": "airtable-log-rejected",
+      "module": "airtable:CreateRecord",
+      "description": "Log rejected topic for analysis",
+      "parameters": {
+        "baseId": "{{AIRTABLE_BASE_ID}}",
+        "tableId": "Rejected Topics",
+        "fields": {
+          "Title": "{{1.title}}",
+          "URL": "{{1.url}}",
+          "Score": "{{7.overall_score}}",
+          "Reasoning": "{{7.reasoning}}",
+          "Rejected At": "{{now}}"
+        }
+      }
+    }
+  ],
+  "variables": {
+    "FEEDLY_COLLECTION_ID": {
+      "description": "Your Feedly collection/board ID containing AI & Tech feeds",
+      "required": true
+    },
+    "AIRTABLE_BASE_ID": {
+      "description": "Airtable base ID for topic queue",
+      "required": true
+    },
+    "OPENAI_API_KEY": {
+      "description": "OpenAI API key for GPT-4 scoring",
+      "required": true,
+      "sensitive": true
+    },
+    "SLACK_CHANNEL_ID": {
+      "description": "Slack channel ID for topic alerts",
+      "required": true
+    },
+    "RESEARCH_WEBHOOK_URL": {
+      "description": "Webhook URL to trigger research pipeline (optional)",
+      "required": false
+    }
+  },
+  "notes": [
+    "This scenario runs every 15 minutes to check for new articles",
+    "Topics scoring ≥7 are sent to Slack for human approval",
+    "Topics scoring <7 are logged but not alerted",
+    "Duplicate detection prevents re-processing the same article"
+  ]
+}
